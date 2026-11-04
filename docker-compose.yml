@@ -1,0 +1,11 @@
+services:
+  dexbot:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./config/default.yaml:/app/config/default.yaml:ro
+    # Образ уже запускает часовой цикл. Для разового dry-run:
+    # command: ["python", "-m", "dexbot", "run", "--once", "--mock", "--config", "/app/config/default.yaml"]
+    restart: unless-stopped

@@ -1,0 +1,128 @@
+# Бумажный режим по умолчанию. Testnet включается только явным mode: testnet.
+# Mainnet невозможен, пока allow_mainnet: false.
+
+mode: paper
+allow_mainnet: false
+
+exchange:
+  name: bybit   # bybit | binance. В paper это источник публичных котировок.
+
+filter:
+  quote: USDT
+  top_n: 40
+  top_n_min: 30
+  top_n_max: 50
+  min_quote_volume_usd: 20000000   # диапазон из постановки: 20–50 млн
+  max_spread_bps: 15
+  min_listing_age_days: 30
+  missing_listing_policy: allow    # reject, если биржа не отдаёт дату листинга
+  prepool_multiplier: 3
+  blocklist:
+    - DOGE
+    - SHIB
+    - PEPE
+    - FLOKI
+    - BONK
+    - WIF
+    - MEME
+    - BOME
+    - MEW
+    - TURBO
+    - NEIRO
+    - PEOPLE
+    - LADYS
+    - BABYDOGE
+    - ELON
+    - SAMO
+    - MYRO
+    - POPCAT
+    - MOG
+    - BRETT
+    - PNUT
+    - ACT
+    - GOAT
+    - FARTCOIN
+    - TRUMP
+    - MELANIA
+    - AIDOGE
+    - WOJAK
+    - TOSHI
+    - DEGEN
+    - MOODENG
+    - DOGS
+    - BODEN
+    - SLERF
+    - PONKE
+    - GIGA
+    - MICHI
+    - USDC
+    - FDUSD
+    - TUSD
+    - DAI
+    - USDE
+    - BUSD
+    - PYUSD
+    - EUR
+
+risk:
+  max_equity_risk_pct: 0.01     # не больше 1% эквити на сделку
+  max_open_positions: 3
+  max_daily_loss_pct: 0.03      # дневной стоп 3%
+  min_reward_risk: 2.0          # минимум 1:2, то есть прибыль / риск >= 2
+  kill_switch: false
+  kill_switch_file: data/KILL   # touch этого файла закрывает все позиции
+  paper_equity_usd: 10000
+  fee_rate: 0.001
+  max_entry_deviation_pct: 0.02
+
+llm:
+  provider: xai
+  base_url: https://api.x.ai/v1
+  api_key_env: XAI_API_KEY
+  timeout_s: 90
+  temperature: 0.2
+  models:
+    base_analysis: grok-4-fast
+    volume: grok-4-fast
+    news: grok-4-fast
+    planner: grok-4-fast
+    risk_manager: grok-4-fast
+    skeptic: grok-4
+    team_lead: grok-4
+  fallback:
+    enabled: false
+    base_url: http://127.0.0.1:8080/v1   # OpenAI-совместимый прокси, например freellmapi
+    api_key_env: FALLBACK_API_KEY
+    model: gpt-4o-mini
+    agents:
+      - volume   # только дешёвый предфильтр; skeptic/team_lead/news сюда нельзя
+
+tradingagents:
+  enabled: false                 # true зовёт TauricResearch/TradingAgents, если пакет установлен
+  fallback_to_native: true
+  llm_provider: xai
+  quick_think_llm: grok-4-fast
+  deep_think_llm: grok-4
+  max_debate_rounds: 1
+  max_risk_discuss_rounds: 1
+  max_symbols: 5
+
+scheduler:
+  interval_seconds: 3600
+  align_to_hour: true
+
+journal:
+  path: data/journal.sqlite
+
+volume:
+  lookback: 24
+  ratio_threshold: 2.0
+  zscore_threshold: 2.0
+
+market:
+  candle_timeframe: 1h
+  candle_limit: 120
+  source: public    # public | mock. --mock на CLI принудительно ставит mock и paper
+
+log_level: INFO
+log_json: true

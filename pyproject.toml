@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dexbot"
+version = "0.1.0"
+description = "Paper and testnet multi-agent crypto trading desk. Mainnet orders stay off unless allow_mainnet is set."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "ccxt>=4.4.0",
+    "openai>=1.40.0",
+    "pydantic>=2.6",
+    "PyYAML>=6.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+# Optional. TradingAgents is an upstream LangGraph research framework.
+# The desk runs without it; see the README for why the default path is the adapter.
+tradingagents = [
+    "tradingagents @ git+https://github.com/TauricResearch/TradingAgents.git",
+]
+
+[project.scripts]
+dexbot = "dexbot.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["dexbot*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
