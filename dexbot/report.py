@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from collections import defaultdict
 
-from dexbot.config import load_settings
+from dexbot.config import Settings, load_settings
 from dexbot.journal import Journal
 from dexbot.models import Position
+
+logger = logging.getLogger("dexbot.report")
 
 AGENTS = (
     "base_analysis",
@@ -20,7 +23,7 @@ AGENTS = (
 )
 
 
-def build_report(journal: Journal) -> dict:
+def build_report(journal: Journal, *, cash: float | None = None) -> dict:
     """Usefulness is hit-rate on closed trades the agent marked ``buy``, minus the book win rate.
 
     Skipped names have no outcome, so this is not a counterfactual. An agent that
@@ -32,7 +35,8 @@ def build_report(journal: Journal) -> dict:
     win_rate = (len(wins) / len(closed)) if closed else None
     realized = sum(pos.realized_pnl for pos in closed)
     unrealized = sum((pos.last_mark - pos.avg_entry) * pos.qty_base - pos.buy_fee for pos in opened)
-    cash = journal.get_cash()
+    if cash is None:
+        cash = journal.get_cash()
     equity = None if cash is None else cash + sum(pos.qty_base * pos.last_mark for pos in opened)
 
     stance: dict[tuple[int, str, str], str] = {}
@@ -77,6 +81,42 @@ def _supported(closed: list[Position], stance: dict[tuple[int, str, str], str], 
     return picked
 
 
+def fetch_exchange_usdt(settings: Settings, client=None) -> float:
+    """USDT total on the private venue. Demo uses the unified wallet."""
+    from dexbot.config import exchange_credentials
+    from dexbot.execution import guard_client, make_trading_client, quote_total
+
+    kind = settings.mode
+    if client is None:
+        key, secret = exchange_credentials(settings)
+        client = make_trading_client(
+            settings.exchange.name,
+            key,
+            secret,
+            kind=kind,
+            allow_mainnet=settings.allow_mainnet,
+        )
+    guard_client(
+        client,
+        kind=kind,
+        name=settings.exchange.name,
+        allow_mainnet=settings.allow_mainnet,
+    )
+    params = {"type": "unified"} if kind == "demo" and settings.exchange.name == "bybit" else {}
+    balance = client.fetch_balance(params)
+    return quote_total(balance, "USDT")
+
+
+def load_report(settings: Settings, journal: Journal, client=None) -> dict:
+    """Paper cash comes from the journal. Demo and testnet cash come from the exchange."""
+    if settings.mode in {"demo", "testnet"} or (settings.mode == "mainnet" and settings.allow_mainnet):
+        try:
+            return build_report(journal, cash=fetch_exchange_usdt(settings, client=client))
+        except Exception:
+            logger.warning("exchange balance unavailable; report cash falls back to the journal")
+    return build_report(journal)
+
+
 def render_report(report: dict) -> str:
     win = "n/a" if report["win_rate"] is None else f"{report['win_rate'] * 100:.2f}%"
     lines = [
@@ -115,7 +155,7 @@ def main(argv: list[str] | None = None) -> int:
         settings.journal.path = args.journal
     journal = Journal(settings.journal.path)
     try:
-        print(render_report(build_report(journal)))
+        print(render_report(load_report(settings, journal)))
     finally:
         journal.close()
     return 0

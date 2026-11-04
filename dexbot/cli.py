@@ -10,7 +10,7 @@ from dexbot.check import inspect_connection, render_check
 from dexbot.config import load_settings
 from dexbot.logging_setup import configure_logging, event
 from dexbot.pipeline import run_cycle
-from dexbot.report import build_report, render_report
+from dexbot.report import load_report, render_report
 from dexbot.runtime import build_runtime
 from dexbot.schedule import sleep_seconds
 
@@ -54,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
 
         journal = Journal(settings.journal.path)
         try:
-            print(render_report(build_report(journal)))
+            print(render_report(load_report(settings, journal)))
         finally:
             journal.close()
         return 0

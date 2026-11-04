@@ -329,6 +329,85 @@ def test_rules_buy_a_volume_spike_and_skip_a_quiet_tape():
     assert skip.skeptic.vote == "skip"
 
 
+def _xai_400():
+    exc = Exception("Error code: 400")
+    exc.status_code = 400
+    exc.body = {"error": "Incorrect API key provided"}
+    return exc
+
+
+class _Models:
+    def __init__(self, error: BaseException | None) -> None:
+        self.error = error
+
+    def list(self):
+        if self.error is not None:
+            raise self.error
+        return []
+
+
+class _Chat:
+    def __init__(self, error: BaseException | None) -> None:
+        self.error = error
+
+    def create(self, **kwargs):
+        if self.error is not None:
+            raise self.error
+        raise AssertionError("chat should not be called")
+
+
+def _client(models_error, chat_error):
+    return type("Client", (), {"models": _Models(models_error), "chat": type("Chat", (), {"completions": _Chat(chat_error)})()})()
+
+
+def test_startup_probe_treats_http_400_incorrect_key_as_rejected(monkeypatch, caplog):
+    monkeypatch.setenv("XAI_API_KEY", "sk-test-secret")
+    caplog.set_level("WARNING")
+    llm = build_llm(Settings(), client=_client(_xai_400(), None))
+    assert llm.using_rules is True
+    assert "LLM fallback" in caplog.text
+    assert "HTTP 400" in caplog.text
+    assert "sk-test-secret" not in caplog.text
+
+
+def test_mid_run_400_auth_uses_rules_for_the_symbol(monkeypatch):
+    monkeypatch.setenv("XAI_API_KEY", "sk-test-secret")
+    llm = build_llm(Settings(), client=_client(None, _xai_400()))
+    assert llm.using_rules is False
+    quiet = compute_stats(make_candles(price=100, spike_last=False, now_ms=10_000_000_000), VolumeConfig())
+    base = BaseAnalysis(symbol="BTC/USDT", rating="hold", summary="seed", stance="wait")
+    layer = run_second_layer(llm, Settings(), symbol="BTC/USDT", stats=quiet, base=base, mark=100)
+    assert llm.using_rules is True
+    assert layer.decision.action == "skip"
+    assert layer.notes == []
+    assert "rule fallback" in layer.decision.reasoning
+
+
+def test_http_400_about_response_format_is_not_an_auth_failure():
+    class Format:
+        last_citations: list[str] = []
+
+        def complete_json(self, **kwargs):
+            raise ProviderError(
+                "Error code: 400 - response_format is not supported",
+                status_code=400,
+                body={"error": {"message": "response_format is not supported"}},
+            )
+
+    llm = ResilientLLM(Format(), RuleBasedLLM(), env_name="XAI_API_KEY")
+    with pytest.raises(ProviderError):
+        llm.complete_json(
+            agent="news",
+            symbol="BTC/USDT",
+            schema=NewsReport,
+            system="s",
+            user="{}",
+            search=False,
+            model="grok",
+        )
+    assert llm.using_rules is False
+
+
 def test_invalid_xai_key_switches_to_rules():
     class Rejected:
         last_citations: list[str] = []
@@ -415,6 +494,64 @@ def test_demo_runtime_keeps_orders_off_the_public_client(tmp_path, monkeypatch):
         assert "demo-secret" not in json.dumps(market.secondary.client.urls)
     finally:
         runtime.journal.close()
+
+
+def test_demo_report_uses_exchange_balance(tmp_path):
+    from datetime import datetime, timezone
+
+    from dexbot.journal import Journal
+    from dexbot.models import Fill
+    from dexbot.report import load_report, render_report
+
+    journal = Journal(tmp_path / "journal.sqlite")
+    now = datetime.now(timezone.utc)
+    run_id = journal.start_run(mode="demo", exchange="bybit-demo", mock=False, started_at=now)
+    decision_id = journal.add_decision(
+        run_id,
+        symbol="BTC/USDT",
+        action="buy",
+        skeptic_vote="buy",
+        executed=True,
+        block_reason=None,
+        payload={},
+        created_at=now,
+    )
+    journal.record_entry(
+        run_id=run_id,
+        decision_id=decision_id,
+        mode="demo",
+        fill=Fill("o1", "BTC/USDT", "buy", 100, 2, 200, 0, "filled"),
+        stop_loss=90,
+        take_profit=130,
+        created_at=now,
+        cash=None,
+    )
+    journal.mark_positions({"BTC/USDT": 110})
+
+    class Client:
+        hostname = "bybit.com"
+        urls = {"api": {"private": "https://api-demo.bybit.com", "spot": "https://api-demo.bybit.com"}}
+
+        def __init__(self) -> None:
+            self.params = None
+
+        def fetch_balance(self, params=None):
+            self.params = params
+            return {"USDT": {"free": 2500, "used": 0, "total": 2500.5}}
+
+    client = Client()
+    try:
+        paper = render_report(load_report(Settings(), journal))
+        report = load_report(Settings(mode="demo"), journal, client=client)
+        text = render_report(report)
+    finally:
+        journal.close()
+    assert "Кэш: n/a" in paper
+    assert client.params == {"type": "unified"}
+    assert report["cash"] == pytest.approx(2500.5)
+    assert report["equity"] == pytest.approx(2500.5 + 2 * 110)
+    assert "Кэш: 2500.50 USDT" in text
+    assert "Эквити (кэш + оценка позиций): 2720.50 USDT" in text
 
 
 def test_mock_from_demo_config_stays_on_paper(tmp_path):
