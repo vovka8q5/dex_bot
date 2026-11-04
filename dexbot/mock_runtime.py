@@ -68,6 +68,11 @@ class ScriptedLLM:
     """Returns schema-valid JSON without calling a provider."""
 
     using_rules = False
+    provider_name = "scripted"
+    supports_live_search = False
+
+    def usage_calls(self) -> list[dict]:
+        return []
 
     def __init__(self) -> None:
         self.last_citations: list[str] = []

@@ -79,9 +79,12 @@ risk:
   max_entry_deviation_pct: 0.02
 
 llm:
-  provider: xai
+  # auto: xAI, если ключ проходит GET /models, иначе DeepSeek, иначе правила.
+  provider: auto
   base_url: https://api.x.ai/v1
   api_key_env: XAI_API_KEY
+  deepseek_base_url: https://api.deepseek.com
+  deepseek_api_key_env: DEEPSEEK_API_KEY
   timeout_s: 90
   temperature: 0.2
   models:
@@ -92,6 +95,20 @@ llm:
     risk_manager: grok-4-fast
     skeptic: grok-4
     team_lead: grok-4
+  deepseek_models:
+    base_analysis: deepseek-chat
+    volume: deepseek-chat
+    news: deepseek-chat
+    planner: deepseek-chat
+    risk_manager: deepseek-chat
+    skeptic: deepseek-chat
+    team_lead: deepseek-chat
+  # Оценка USD за 1M токенов. Поправьте, когда прайс изменится.
+  prices_per_million:
+    deepseek-chat: {input: 0.27, output: 1.10}
+    deepseek-reasoner: {input: 0.55, output: 2.19}
+    grok-4-fast: {input: 0.20, output: 0.50}
+    grok-4: {input: 3.0, output: 15.0}
   fallback:
     enabled: false
     base_url: http://127.0.0.1:8080/v1   # OpenAI-совместимый прокси, например freellmapi
@@ -116,6 +133,19 @@ scheduler:
 
 journal:
   path: data/journal.sqlite
+
+news:
+  lookback_hours: 48
+  timeout_s: 10
+  feeds:
+    - name: coindesk
+      url: https://www.coindesk.com/arc/outboundfeeds/rss/
+    - name: cointelegraph
+      url: https://cointelegraph.com/rss
+    - name: decrypt
+      url: https://decrypt.co/feed
+    - name: theblock
+      url: https://www.theblock.co/rss.xml
 
 volume:
   lookback: 24

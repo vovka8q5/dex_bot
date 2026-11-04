@@ -63,7 +63,12 @@ class RuleBasedLLM:
     """Schema-valid agent replies with no network call."""
 
     using_rules = True
+    provider_name = "rules"
+    supports_live_search = False
     last_citations: list[str] = []
+
+    def usage_calls(self) -> list[dict]:
+        return []
 
     def complete_json(
         self,

@@ -57,7 +57,17 @@ pip install "dexbot[tradingagents]"
 
 ## LLM
 
-Клиент OpenAI-совместимый. По умолчанию xAI:
+Клиент OpenAI-совместимый. По умолчанию `llm.provider: auto`:
+
+- если `XAI_API_KEY` проходит `GET /models`, активен xAI и новости ищутся в вебе и X;
+- иначе если `DEEPSEEK_API_KEY` проходит такой же пробник, активен DeepSeek (`https://api.deepseek.com`, модель `deepseek-chat`, JSON mode). У DeepSeek нет живого поиска: заголовки за последние 48 часов берутся из RSS (CoinDesk, Cointelegraph, Decrypt, The Block) и отдаются модели на разметку `serious news` / `minor news` / `rumor`. Сломанная лента не останавливает проход;
+- иначе правила без модели. В логе есть строка `LLM provider active` с именем провайдера, без ключа.
+
+Явный выбор: `llm.provider: deepseek` или `xai`. Для `deepseek-reasoner` JSON mode может быть недоступен: стол повторит запрос без `response_format` и разберёт JSON из текста. По умолчанию все агенты DeepSeek сидят на `deepseek-chat`.
+
+Оценка токенов и стоимости пишется в журнал и печатается в `dexbot report`. Цены лежат в `llm.prices_per_million` (USD за 1M токенов) и их нужно поправить, когда прайс изменится.
+
+Если выбран xAI:
 
 - `base_url`: `https://api.x.ai/v1`
 - ключ: переменная `XAI_API_KEY`
@@ -161,6 +171,13 @@ python -m dexbot check
 
 ```bash
 DEXBOT_MODE=demo python -m dexbot run --once
+```
+
+Тот же проход на DeepSeek, когда ключ xAI пустой или отвергнут, а `DEEPSEEK_API_KEY` задан (`provider: auto` уже стоит в примере):
+
+```bash
+DEXBOT_MODE=demo python -m dexbot run --once
+DEXBOT_MODE=demo python -m dexbot report
 ```
 
 То же самое, если в yaml поставить `mode: demo` (и оставить `exchange.mode: demo`). Если `XAI_API_KEY` пустой или API его отвергает, в логе будет `LLM fallback`, новости не ищутся, а агенты отвечают правилами по уже посчитанным свечам. Отказ ключа проверяется при старте запросом `GET /v1/models`: HTTP 400 с текстом Incorrect API key, а также 401 и 403, переключают весь прогон на правила. Тот же переход происходит в середине прогона, если чат ответил отказом ключа, и символ из-за этого не помечается как ошибка. Сделка возможна только когда код сам видит всплеск объёма и отношение прибыль/риск не хуже 1:2. Офлайн-прогон без биржи по-прежнему `python -m dexbot run --once --mock`.

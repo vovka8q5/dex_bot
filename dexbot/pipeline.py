@@ -99,8 +99,10 @@ def run_cycle(runtime: Runtime, *, kill: bool = False, now: datetime | None = No
     try:
         summary = _run(runtime, run_id, moment, kill)
     except Exception as exc:
+        _flush_usage(runtime, run_id, moment)
         runtime.journal.finish_run(run_id, "error", note=str(exc), finished_at=moment)
         raise
+    _flush_usage(runtime, run_id, moment)
     runtime.journal.finish_run(run_id, summary.status, finished_at=moment)
     event(
         logger,
@@ -115,9 +117,32 @@ def run_cycle(runtime: Runtime, *, kill: bool = False, now: datetime | None = No
     return summary
 
 
+def _flush_usage(runtime: Runtime, run_id: int, moment: datetime) -> None:
+    reader = getattr(runtime.llm, "usage_calls", None)
+    calls = list(reader()) if callable(reader) else []
+    runtime.journal.record_llm_usage(run_id, calls, created_at=moment)
+
+
+def _headlines(runtime: Runtime, symbol: str, now: datetime) -> list[dict]:
+    if getattr(runtime.llm, "provider_name", "") != "deepseek":
+        return []
+    cache = getattr(runtime, "_headline_cache", None)
+    if cache is None:
+        from dexbot.news_feeds import HeadlineCache
+
+        cache = HeadlineCache(
+            runtime.settings.news,
+            fetcher=getattr(runtime, "feed_fetcher", None),
+            now=now,
+        )
+        runtime._headline_cache = cache
+    return cache.for_symbol(symbol)
+
+
 def _run(runtime: Runtime, run_id: int, now: datetime, kill: bool) -> CycleSummary:
     settings = runtime.settings
     journal = runtime.journal
+    runtime._headline_cache = None
     tickers = runtime.venue.market.fetch_tickers()
     runtime.venue.broker.set_marks({ticker.symbol: ticker.last for ticker in tickers})
     journal.mark_positions({ticker.symbol: ticker.last for ticker in tickers})
@@ -252,7 +277,15 @@ def _symbol(
     stats = compute_stats(candles, settings.volume)
     base = runtime.analyzer.analyze(symbol, stats, candles)
     _log_agent(journal, run_id, symbol, "base_analysis", base.stance, base.summary, base.model_dump(), now)
-    layer = run_second_layer(runtime.llm, settings, symbol=symbol, stats=stats, base=base, mark=mark)
+    layer = run_second_layer(
+        runtime.llm,
+        settings,
+        symbol=symbol,
+        stats=stats,
+        base=base,
+        mark=mark,
+        headlines=_headlines(runtime, symbol, now),
+    )
     _log_agent(journal, run_id, symbol, "volume", layer.volume.stance, layer.volume.reasoning, layer.volume.model_dump(), now)
     _log_agent(journal, run_id, symbol, "news", layer.news.stance, layer.news.reasoning, layer.news.model_dump(), now)
     _log_agent(journal, run_id, symbol, "planner", layer.plan.stance, layer.plan.reasoning, layer.plan.model_dump(), now)

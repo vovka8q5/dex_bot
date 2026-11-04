@@ -91,6 +91,47 @@ class ModelsConfig(Strict):
     team_lead: str = "grok-4"
 
 
+class TokenPrice(Strict):
+    input: float
+    output: float
+
+
+def _deepseek_models() -> ModelsConfig:
+    return ModelsConfig(
+        base_analysis="deepseek-chat",
+        volume="deepseek-chat",
+        news="deepseek-chat",
+        planner="deepseek-chat",
+        risk_manager="deepseek-chat",
+        skeptic="deepseek-chat",
+        team_lead="deepseek-chat",
+    )
+
+
+def _default_prices() -> dict[str, TokenPrice]:
+    # Published list prices, USD per 1M tokens. Override in YAML when they change.
+    return {
+        "deepseek-chat": TokenPrice(input=0.27, output=1.10),
+        "deepseek-reasoner": TokenPrice(input=0.55, output=2.19),
+        "grok-4-fast": TokenPrice(input=0.20, output=0.50),
+        "grok-4": TokenPrice(input=3.0, output=15.0),
+    }
+
+
+class FeedConfig(Strict):
+    name: str
+    url: str
+
+
+def _default_feeds() -> list[FeedConfig]:
+    return [
+        FeedConfig(name="coindesk", url="https://www.coindesk.com/arc/outboundfeeds/rss/"),
+        FeedConfig(name="cointelegraph", url="https://cointelegraph.com/rss"),
+        FeedConfig(name="decrypt", url="https://decrypt.co/feed"),
+        FeedConfig(name="theblock", url="https://www.theblock.co/rss.xml"),
+    ]
+
+
 class FallbackConfig(Strict):
     enabled: bool = False
     base_url: str = "http://127.0.0.1:8080/v1"
@@ -111,16 +152,35 @@ class FallbackConfig(Strict):
 
 
 class LLMConfig(Strict):
-    provider: str = "xai"
+    # auto: xAI if its key passes GET /models, else DeepSeek, else rules.
+    provider: Literal["auto", "xai", "deepseek"] = "auto"
     base_url: str = "https://api.x.ai/v1"
     api_key_env: str = "XAI_API_KEY"
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_api_key_env: str = "DEEPSEEK_API_KEY"
     timeout_s: float = 90
     temperature: float = 0.2
     models: ModelsConfig = Field(default_factory=ModelsConfig)
+    deepseek_models: ModelsConfig = Field(default_factory=_deepseek_models)
+    prices_per_million: dict[str, TokenPrice] = Field(default_factory=_default_prices)
     fallback: FallbackConfig = Field(default_factory=FallbackConfig)
 
-    def model_for(self, agent: str) -> str:
-        return getattr(self.models, agent)
+    def model_for(self, agent: str, provider: str = "xai") -> str:
+        table = self.deepseek_models if provider == "deepseek" else self.models
+        return getattr(table, agent)
+
+
+class NewsConfig(Strict):
+    lookback_hours: int = 48
+    timeout_s: float = 10
+    feeds: list[FeedConfig] = Field(default_factory=_default_feeds)
+
+    @field_validator("lookback_hours")
+    @classmethod
+    def _lookback(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("news.lookback_hours must be >= 1")
+        return value
 
 
 class TradingAgentsConfig(Strict):
@@ -188,6 +248,7 @@ class Settings(Strict):
     filter: FilterConfig = Field(default_factory=FilterConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    news: NewsConfig = Field(default_factory=NewsConfig)
     tradingagents: TradingAgentsConfig = Field(default_factory=TradingAgentsConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     journal: JournalConfig = Field(default_factory=JournalConfig)

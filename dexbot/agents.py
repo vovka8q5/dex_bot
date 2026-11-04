@@ -37,6 +37,14 @@ stance is buy, wait, or skip. A rumor-only tape is not a buy.
 Return JSON: symbol, items (list of headline, source, url, label, summary), overall, stance, reasoning.
 {_JSON}"""
 
+_NEWS_RSS_SYSTEM = f"""You label crypto headlines already collected from RSS.
+Do not invent headlines and do not browse. Use only the headlines list.
+Label every item with exactly one of: "serious news", "minor news", or "rumor".
+source is "web". url is the link. overall is one of those three, or "none" when the list is empty.
+stance is buy, wait, or skip. A rumor-only tape is not a buy.
+Return JSON: symbol, items (list of headline, source, url, label, summary), overall, stance, reasoning.
+{_JSON}"""
+
 _PLAN_SYSTEM = f"""You plan a spot long only. No shorts.
 Propose entry, stop_loss, take_profit near the mark. stop_loss < entry < take_profit.
 If there is no trade, set side to "flat" and stance to "skip".
@@ -121,6 +129,7 @@ def run_second_layer(
     stats: MarketStats,
     base: BaseAnalysis,
     mark: float,
+    headlines: list[dict] | None = None,
 ) -> SecondLayer:
     context = {
         "symbol": symbol,
@@ -153,15 +162,26 @@ def run_second_layer(
             reasoning=_failed(symbol, f"volume_failed: {exc}"),
         )
 
+    live_search = bool(getattr(llm, "supports_live_search", False))
+    if live_search:
+        news_system = _NEWS_SYSTEM
+        news_payload = {**context, "task": "Search the web and X for the last 24h move."}
+    else:
+        news_system = _NEWS_RSS_SYSTEM
+        news_payload = {
+            **context,
+            "headlines": headlines or [],
+            "task": "Label these RSS headlines from the lookback window.",
+        }
     try:
         news = _ask(
             llm,
             "news",
             symbol,
             NewsReport,
-            _NEWS_SYSTEM,
-            {**context, "task": "Search the web and X for the last 24h move."},
-            search=True,
+            news_system,
+            news_payload,
+            search=live_search,
         )
         news = news.model_copy(
             update={"symbol": symbol, "citations": list(getattr(llm, "last_citations", []) or [])}

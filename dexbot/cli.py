@@ -79,6 +79,7 @@ def _serve(settings, *, once: bool, mock: bool) -> int:
         mock=runtime.mock,
         allow_mainnet=runtime.settings.allow_mainnet,
         llm_fallback=bool(getattr(runtime.llm, "using_rules", False)),
+        llm_provider=getattr(runtime.llm, "provider_name", "unknown"),
     )
     try:
         while True:

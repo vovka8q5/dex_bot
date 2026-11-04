@@ -70,7 +70,31 @@ def build_report(journal: Journal, *, cash: float | None = None) -> dict:
         "equity": equity,
         "open_positions": len(opened),
         "agents": agents,
+        "llm": _llm_summary(journal),
     }
+
+
+def _llm_summary(journal: Journal) -> dict:
+    rows = journal.llm_usage_rows()
+    latest_id = max((int(row["run_id"]) for row in rows), default=None)
+
+    def pack(selected: list[dict]) -> dict:
+        prompt = sum(int(row["prompt_tokens"] or 0) for row in selected)
+        completion = sum(int(row["completion_tokens"] or 0) for row in selected)
+        total = sum(int(row["total_tokens"] or 0) for row in selected)
+        costs = [row["estimated_cost_usd"] for row in selected if row["estimated_cost_usd"] is not None]
+        providers = sorted({row["provider"] for row in selected if row["provider"]})
+        return {
+            "calls": len(selected),
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
+            "total_tokens": total,
+            "estimated_cost_usd": None if not costs else float(sum(costs)),
+            "providers": providers,
+        }
+
+    latest = [row for row in rows if latest_id is not None and int(row["run_id"]) == latest_id]
+    return {"latest_run_id": latest_id, "latest": pack(latest), "all": pack(rows)}
 
 
 def _supported(closed: list[Position], stance: dict[tuple[int, str, str], str], agent: str) -> list[bool]:
@@ -127,6 +151,8 @@ def render_report(report: dict) -> str:
         f"Открытых позиций: {report['open_positions']}",
         f"Кэш: {_num(report['cash'])} USDT",
         f"Эквити (кэш + оценка позиций): {_num(report['equity'])} USDT",
+        _llm_line("Последний прогон", report["llm"]["latest"], report["llm"]["latest_run_id"]),
+        _llm_line("Все прогоны", report["llm"]["all"], None),
         "",
         "Полезность агента = доля прибыльных среди сделок, где stance был buy, минус общая доля прибыльных.",
         "Пропущенные идеи в расчёт не входят: по ним нет результата.",
@@ -139,6 +165,27 @@ def render_report(report: dict) -> str:
         votes = ", ".join(f"{key}={value}" for key, value in sorted(stat["votes"].items())) or "-"
         lines.append(f"{name:<16} {stat['supported']:>4} {hit:>8} {useful:>12}  {votes}")
     return "\n".join(lines)
+
+
+def _llm_line(label: str, block: dict, run_id: int | None) -> str:
+    if not block["calls"]:
+        suffix = f" #{run_id}" if run_id is not None else ""
+        return f"LLM {label}{suffix}: нет вызовов"
+    who = ",".join(block["providers"]) or "unknown"
+    run = f" #{run_id}" if run_id is not None else ""
+    cost = _usd(block["estimated_cost_usd"])
+    return (
+        f"LLM {label}{run} ({who}): токены {block['total_tokens']} "
+        f"(prompt {block['prompt_tokens']}, completion {block['completion_tokens']}), оценка {cost}"
+    )
+
+
+def _usd(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    if abs(value) < 0.01:
+        return f"${value:.6f}"
+    return f"${value:.4f}"
 
 
 def _num(value: float | None) -> str:

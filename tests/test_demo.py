@@ -362,6 +362,7 @@ def _client(models_error, chat_error):
 
 def test_startup_probe_treats_http_400_incorrect_key_as_rejected(monkeypatch, caplog):
     monkeypatch.setenv("XAI_API_KEY", "sk-test-secret")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     caplog.set_level("WARNING")
     llm = build_llm(Settings(), client=_client(_xai_400(), None))
     assert llm.using_rules is True
@@ -458,17 +459,20 @@ def test_invalid_xai_key_switches_to_rules():
 
 def test_missing_xai_key_logs_fallback(monkeypatch, caplog):
     monkeypatch.delenv("XAI_API_KEY", raising=False)
-    caplog.set_level("WARNING")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    caplog.set_level("INFO")
     llm = build_llm(Settings())
     assert llm.using_rules is True
+    assert "XAI_API_KEY is unset" in caplog.text
+    assert "DEEPSEEK_API_KEY is unset" in caplog.text
     assert "LLM fallback" in caplog.text
-    assert "XAI_API_KEY" in caplog.text
 
 
 def test_demo_runtime_keeps_orders_off_the_public_client(tmp_path, monkeypatch):
     monkeypatch.setenv("BYBIT_DEMO_API_KEY", "demo-key")
     monkeypatch.setenv("BYBIT_DEMO_API_SECRET", "demo-secret")
     monkeypatch.delenv("XAI_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     settings = load_settings(package_config_path())
     settings.mode = "demo"
     settings.journal.path = str(tmp_path / "journal.sqlite")

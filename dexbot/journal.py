@@ -135,8 +135,22 @@ class Journal:
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 cash REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS llm_calls (
+                id INTEGER PRIMARY KEY,
+                run_id INTEGER NOT NULL,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                agent TEXT,
+                prompt_tokens INTEGER NOT NULL,
+                completion_tokens INTEGER NOT NULL,
+                total_tokens INTEGER NOT NULL,
+                estimated_cost_usd REAL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (run_id) REFERENCES runs(id)
+            );
             CREATE INDEX IF NOT EXISTS idx_agent_run ON agent_outputs(run_id, symbol, agent);
             CREATE INDEX IF NOT EXISTS idx_pos_status ON positions(status);
+            CREATE INDEX IF NOT EXISTS idx_llm_run ON llm_calls(run_id);
             """
         )
 
@@ -150,6 +164,37 @@ class Journal:
         )
         self.conn.commit()
         return int(cur.lastrowid)
+
+    def record_llm_usage(self, run_id: int, calls: list[dict], *, created_at: datetime) -> None:
+        if not calls:
+            return
+        stamp = _iso(created_at)
+        self.conn.executemany(
+            """
+            INSERT INTO llm_calls (
+                run_id, provider, model, agent, prompt_tokens, completion_tokens,
+                total_tokens, estimated_cost_usd, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    run_id,
+                    str(row.get("provider") or ""),
+                    str(row.get("model") or ""),
+                    str(row.get("agent") or ""),
+                    int(row.get("prompt_tokens") or 0),
+                    int(row.get("completion_tokens") or 0),
+                    int(row.get("total_tokens") or 0),
+                    row.get("estimated_cost_usd"),
+                    stamp,
+                )
+                for row in calls
+            ],
+        )
+        self.conn.commit()
+
+    def llm_usage_rows(self) -> list[dict]:
+        return [dict(row) for row in self.conn.execute("SELECT * FROM llm_calls ORDER BY id")]
 
     def finish_run(self, run_id: int, status: str, note: str = "", finished_at: datetime | None = None) -> None:
         self.conn.execute(

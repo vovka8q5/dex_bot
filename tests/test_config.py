@@ -27,8 +27,12 @@ def test_default_yaml_is_paper():
     assert settings.risk.max_open_positions == 3
     assert settings.risk.max_daily_loss_pct == pytest.approx(0.03)
     assert settings.risk.min_reward_risk == pytest.approx(2)
+    assert settings.llm.provider == "auto"
     assert settings.llm.base_url == "https://api.x.ai/v1"
     assert settings.llm.api_key_env == "XAI_API_KEY"
+    assert settings.llm.deepseek_base_url == "https://api.deepseek.com"
+    assert settings.llm.deepseek_models.team_lead == "deepseek-chat"
+    assert settings.news.lookback_hours == 48
     assert settings.filter.top_n_min <= settings.filter.top_n <= settings.filter.top_n_max
     assert "DOGE" in {item.upper() for item in settings.filter.blocklist}
     assert settings.llm.models.skeptic
