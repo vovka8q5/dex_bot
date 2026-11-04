@@ -67,6 +67,8 @@ def demo_venue(cash: float, fee_rate: float) -> Venue:
 class ScriptedLLM:
     """Returns schema-valid JSON without calling a provider."""
 
+    using_rules = False
+
     def __init__(self) -> None:
         self.last_citations: list[str] = []
 

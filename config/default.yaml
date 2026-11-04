@@ -1,11 +1,14 @@
-# Бумажный режим по умолчанию. Testnet включается только явным mode: testnet.
+# Стол по умолчанию бумажный и ордера не шлёт.
+# Для Bybit Demo Trading поставьте mode: demo (или DEXBOT_MODE=demo).
+# exchange.mode: demo — это api-demo.bybit.com, не testnet и не боевой счёт.
 # Mainnet невозможен, пока allow_mainnet: false.
 
 mode: paper
 allow_mainnet: false
 
 exchange:
-  name: bybit   # bybit | binance. В paper это источник публичных котировок.
+  name: bybit          # bybit | binance
+  mode: demo           # demo | testnet | mainnet. Для Bybit по умолчанию демо.
 
 filter:
   quote: USDT

@@ -12,6 +12,7 @@ from typing import Any
 
 from dexbot.config import PREFILTER_AGENTS, Settings
 from dexbot.decisions import DecisionParseError, parse_model
+from dexbot.rules import RuleBasedLLM
 
 logger = logging.getLogger("dexbot.llm")
 
@@ -205,3 +206,60 @@ class RoutingLLM:
             and agent in PREFILTER_AGENTS
             and agent in set(cfg.agents)
         )
+
+
+def invalid_llm_credentials(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return any(
+        needle in text
+        for needle in ("401", "invalid api key", "incorrect api key", "invalid_api_key", "unauthorized")
+    )
+
+
+class ResilientLLM:
+    """Use the configured provider, and switch to rules if the key is rejected."""
+
+    def __init__(self, primary: RoutingLLM, rules: RuleBasedLLM, env_name: str) -> None:
+        self.primary = primary
+        self.rules = rules
+        self.env_name = env_name
+        self._rules_only = False
+        self.last_citations: list[str] = []
+
+    @property
+    def using_rules(self) -> bool:
+        return self._rules_only
+
+    def complete_json(self, **kwargs):
+        if self._rules_only:
+            result = self.rules.complete_json(**kwargs)
+            self.last_citations = []
+            return result
+        try:
+            result = self.primary.complete_json(**kwargs)
+        except ProviderError as exc:
+            if not invalid_llm_credentials(exc):
+                raise
+            self._rules_only = True
+            logger.warning(
+                "LLM fallback: %s was rejected; agents are deterministic rules and news search is off",
+                self.env_name,
+            )
+            result = self.rules.complete_json(**kwargs)
+            self.last_citations = []
+            return result
+        self.last_citations = list(getattr(self.primary, "last_citations", []))
+        return result
+
+
+def build_llm(settings: Settings):
+    """Real provider when the key is present, otherwise deterministic rules."""
+    key = os.getenv(settings.llm.api_key_env, "").strip()
+    rules = RuleBasedLLM()
+    if not key:
+        logger.warning(
+            "LLM fallback: %s is missing; agents are deterministic rules and news search is off",
+            settings.llm.api_key_env,
+        )
+        return rules
+    return ResilientLLM(RoutingLLM(settings), rules, env_name=settings.llm.api_key_env)

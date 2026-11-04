@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_default_yaml_is_paper():
     settings = load_settings(package_config_path())
     assert settings.mode == "paper"
+    assert settings.exchange.mode == "demo"
     assert settings.allow_mainnet is False
     assert settings.risk.max_equity_risk_pct == pytest.approx(0.01)
     assert settings.risk.max_open_positions == 3
@@ -76,9 +77,9 @@ def test_tradingagents_mapping_without_the_package():
 
 def test_mainnet_client_refused_and_sandbox_urls_point_at_testnet():
     with pytest.raises(MainnetDisabled):
-        make_trading_client("bybit", "k", "s", sandbox=False, allow_mainnet=False)
-    bybit = make_trading_client("bybit", "k", "s", sandbox=True, allow_mainnet=False)
-    binance = make_trading_client("binance", "k", "s", sandbox=True, allow_mainnet=False)
+        make_trading_client("bybit", "k", "s", kind="mainnet", allow_mainnet=False)
+    bybit = make_trading_client("bybit", "k", "s", kind="testnet", allow_mainnet=False)
+    binance = make_trading_client("binance", "k", "s", kind="testnet", allow_mainnet=False)
     assert_sandbox_urls("bybit", bybit)
     assert_sandbox_urls("binance", binance)
 

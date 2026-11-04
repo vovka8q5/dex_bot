@@ -6,6 +6,7 @@ import argparse
 import logging
 import time
 
+from dexbot.check import inspect_connection, render_check
 from dexbot.config import load_settings
 from dexbot.logging_setup import configure_logging, event
 from dexbot.pipeline import run_cycle
@@ -19,7 +20,7 @@ logger = logging.getLogger("dexbot.cli")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="dexbot",
-        description="Paper/testnet multi-agent crypto desk. Mainnet stays off without allow_mainnet.",
+        description="Paper, Bybit demo, and testnet desk. Mainnet stays off without allow_mainnet.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -34,11 +35,19 @@ def main(argv: list[str] | None = None) -> int:
     report.add_argument("--config", default=None)
     report.add_argument("--journal", default=None)
 
+    check = sub.add_parser("check", help="Show whether keys are set, permissions, and balances")
+    check.add_argument("--config", default=None)
+
     args = parser.parse_args(argv)
     settings = load_settings(args.config)
-    if args.journal:
+    if getattr(args, "journal", None):
         settings.journal.path = args.journal
     configure_logging(settings.log_level, settings.log_json)
+
+    if args.command == "check":
+        report = inspect_connection(settings)
+        print(render_check(report), flush=True)
+        return report.exit_code
 
     if args.command == "report":
         from dexbot.journal import Journal
@@ -52,6 +61,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.kill_switch:
         settings.risk.kill_switch = True
+    if not args.mock and settings.mode != "paper":
+        preflight = inspect_connection(settings)
+        print(render_check(preflight), flush=True)
+        if preflight.exit_code != 0:
+            return preflight.exit_code
     return _serve(settings, once=args.once, mock=args.mock)
 
 
@@ -64,6 +78,7 @@ def _serve(settings, *, once: bool, mock: bool) -> int:
         exchange=runtime.venue.name,
         mock=runtime.mock,
         allow_mainnet=runtime.settings.allow_mainnet,
+        llm_fallback=bool(getattr(runtime.llm, "using_rules", False)),
     )
     try:
         while True:

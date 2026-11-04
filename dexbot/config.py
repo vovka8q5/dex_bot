@@ -136,6 +136,9 @@ class TradingAgentsConfig(Strict):
 
 class ExchangeConfig(Strict):
     name: Literal["bybit", "binance"] = "bybit"
+    # None means "derive it": demo while the desk is paper, otherwise the desk mode.
+    # Demo is Bybit mainnet demo trading (https://api-demo.bybit.com), not testnet.
+    mode: Literal["demo", "testnet", "mainnet"] | None = None
 
 
 class SchedulerConfig(Strict):
@@ -177,8 +180,9 @@ class MarketConfig(Strict):
 
 
 class Settings(Strict):
-    mode: Literal["paper", "testnet", "mainnet"] = "paper"
+    mode: Literal["paper", "demo", "testnet", "mainnet"] = "paper"
     # Explicit flag. Mainnet orders are impossible while this stays false.
+    # Demo trading does not use this flag and must not reach api.bybit.com.
     allow_mainnet: bool = False
     exchange: ExchangeConfig = Field(default_factory=ExchangeConfig)
     filter: FilterConfig = Field(default_factory=FilterConfig)
@@ -193,11 +197,24 @@ class Settings(Strict):
     log_json: bool = True
 
     @model_validator(mode="after")
-    def _mainnet_flag(self) -> Settings:
+    def _align_venue(self) -> Settings:
+        if self.exchange.mode is None:
+            self.exchange.mode = self.mode if self.mode in {"demo", "testnet", "mainnet"} else "demo"
+        if self.exchange.mode == "demo" and self.exchange.name != "bybit":
+            raise ValueError("exchange.mode demo is Bybit Demo Trading only")
+        if self.mode == "paper":
+            return self
+        if self.exchange.mode != self.mode:
+            raise ValueError(
+                f"mode {self.mode} does not match exchange.mode {self.exchange.mode}. "
+                "Set both to demo, testnet, or mainnet."
+            )
+        if self.mode == "demo" and self.exchange.name != "bybit":
+            raise ValueError("mode demo is Bybit Demo Trading only (api-demo.bybit.com)")
         if self.mode == "mainnet" and not self.allow_mainnet:
             raise ValueError(
                 "mode mainnet is refused unless allow_mainnet is true. "
-                "Paper is the default; testnet is opt-in via mode: testnet."
+                "Paper is the default; demo and testnet do not use this flag."
             )
         return self
 
@@ -238,19 +255,47 @@ def load_settings(path: Path | str | None = None) -> Settings:
     return Settings.model_validate(data)
 
 
+def credential_env_names(name: str, kind: str) -> tuple[str, str]:
+    """Env var names for a private venue. The values themselves are never logged."""
+    if kind == "demo":
+        if name != "bybit":
+            raise ValueError("demo credentials are Bybit only")
+        return "BYBIT_DEMO_API_KEY", "BYBIT_DEMO_API_SECRET"
+    if kind == "testnet":
+        if name == "bybit":
+            return "BYBIT_TESTNET_API_KEY", "BYBIT_TESTNET_API_SECRET"
+        if name == "binance":
+            return "BINANCE_TESTNET_API_KEY", "BINANCE_TESTNET_API_SECRET"
+        raise ValueError(f"unsupported exchange {name}")
+    if kind == "mainnet":
+        return "DEXBOT_MAINNET_API_KEY", "DEXBOT_MAINNET_API_SECRET"
+    raise ValueError(f"unsupported venue {kind}")
+
+
+def keys_are_set(name: str, kind: str) -> bool:
+    """True when both env vars are non-empty. Does not return the secret."""
+    key_env, secret_env = credential_env_names(name, kind)
+    return bool(os.getenv(key_env, "").strip()) and bool(os.getenv(secret_env, "").strip())
+
+
+def private_kind(settings: Settings) -> str:
+    """Venue used for private calls.
+
+    Paper desk mode still reports ``exchange.mode`` so ``check`` can probe the
+    demo key without sending orders. ``run`` only uses this when mode is not paper.
+    """
+    if settings.mode == "paper":
+        return settings.exchange.mode or "demo"
+    return settings.mode
+
+
 def exchange_credentials(settings: Settings) -> tuple[str, str]:
     """Return the key pair for the selected mode. Paper returns empty strings."""
     if settings.mode == "paper":
         return "", ""
-    if settings.mode == "testnet":
-        if settings.exchange.name == "bybit":
-            key_env, secret_env = "BYBIT_TESTNET_API_KEY", "BYBIT_TESTNET_API_SECRET"
-        else:
-            key_env, secret_env = "BINANCE_TESTNET_API_KEY", "BINANCE_TESTNET_API_SECRET"
-    else:
-        key_env, secret_env = "DEXBOT_MAINNET_API_KEY", "DEXBOT_MAINNET_API_SECRET"
-    key = os.getenv(key_env, "")
-    secret = os.getenv(secret_env, "")
+    key_env, secret_env = credential_env_names(settings.exchange.name, settings.mode)
+    key = os.getenv(key_env, "").strip()
+    secret = os.getenv(secret_env, "").strip()
     if not key or not secret:
         raise RuntimeError(
             f"mode {settings.mode} on {settings.exchange.name} requires {key_env} and {secret_env}"

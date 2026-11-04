@@ -12,11 +12,13 @@ from dexbot.execution import (
     CcxtMarketData,
     PaperBroker,
     PublicMarketData,
+    SwitchingMarketData,
     Venue,
+    make_public_client,
     make_trading_client,
 )
 from dexbot.journal import Journal
-from dexbot.llm import RoutingLLM
+from dexbot.llm import build_llm
 from dexbot.mock_runtime import ScriptedLLM, demo_venue
 
 
@@ -40,7 +42,7 @@ def build_runtime(settings: Settings, *, mock: bool = False, llm: Any = None) ->
     journal = Journal(active.journal.path)
     venue = _build_venue(active, journal)
     if llm is None:
-        llm = ScriptedLLM() if active.market.source == "mock" else RoutingLLM(active)
+        llm = ScriptedLLM() if active.market.source == "mock" else build_llm(active)
     return Runtime(
         settings=active,
         venue=venue,
@@ -70,17 +72,38 @@ def _build_venue(settings: Settings, journal: Journal) -> Venue:
             name="paper",
         )
     key, secret = exchange_credentials(settings)
-    sandbox = settings.mode != "mainnet"
+    if settings.mode == "demo":
+        private = make_trading_client(
+            "bybit",
+            key,
+            secret,
+            kind="demo",
+            allow_mainnet=False,
+        )
+        probe = make_public_client("bybit", demo=True)
+        main_public = PublicMarketData("bybit", quote=quote, timeframe=timeframe, limit=limit)
+        return Venue(
+            market=SwitchingMarketData(
+                CcxtMarketData(probe, quote=quote, timeframe=timeframe, limit=limit),
+                main_public,
+            ),
+            broker=CcxtBroker(private, kind="demo", exchange_name="bybit", allow_mainnet=False),
+            name="bybit-demo",
+        )
     client = make_trading_client(
         settings.exchange.name,
         key,
         secret,
-        sandbox=sandbox,
+        kind=settings.mode,
         allow_mainnet=settings.allow_mainnet,
     )
-    label = f"{settings.exchange.name}-{'testnet' if sandbox else 'mainnet'}"
     return Venue(
         market=CcxtMarketData(client, quote=quote, timeframe=timeframe, limit=limit),
-        broker=CcxtBroker(client, sandbox=sandbox, exchange_name=settings.exchange.name),
-        name=label,
+        broker=CcxtBroker(
+            client,
+            kind=settings.mode,
+            exchange_name=settings.exchange.name,
+            allow_mainnet=settings.allow_mainnet,
+        ),
+        name=f"{settings.exchange.name}-{settings.mode}",
     )

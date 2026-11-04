@@ -1,8 +1,8 @@
 # Dexbot — мультиагентный крипто-деск (paper / testnet)
 
-Бумажная и тестовая торговля спотом. Это исследовательский каркас, а не инвестиционная рекомендация: модели ошибаются, тестовая сеть не повторяет боевой стакан, прошлый результат ничего не гарантирует.
+Бумажная, демо- и тестовая торговля спотом. Это исследовательский каркас, а не инвестиционная рекомендация: модели ошибаются, демо и тестовая сеть не повторяют боевой стакан, прошлый результат ничего не гарантирует.
 
-По умолчанию стол только считает сделки на бумаге. Testnet включается явным `mode: testnet`. Ордера на mainnet невозможны, пока в конфиге одновременно не стоят `mode: mainnet` и `allow_mainnet: true`.
+По умолчанию стол только считает сделки на бумаге. Bybit Demo Trading включается явным `mode: demo` (хост `https://api-demo.bybit.com`). Testnet — явным `mode: testnet`. Ордера на mainnet невозможны, пока в конфиге одновременно не стоят `mode: mainnet` и `allow_mainnet: true`. Демо-режим этот флаг не использует и на боевые приватные ручки не переходит.
 
 ## Архитектура
 
@@ -20,7 +20,7 @@ flowchart TD
   sk[Скептик: buy / wait / skip]
   lead[Тимлид: строгий JSON]
   gate{buy и скептик не skip и лимиты кода}
-  exec[Исполнение: paper или ccxt testnet]
+  exec[Исполнение: paper, Bybit demo или ccxt testnet]
   journal[(SQLite журнал)]
 
   sched --> filt --> base
@@ -117,12 +117,53 @@ python -m dexbot run
 | Режим | Что делает |
 | --- | --- |
 | `paper` (по умолчанию) | Публичные котировки без ключа, филлы в памяти и в SQLite. Ордер на биржу не уходит. |
+| `demo` | Bybit Demo Trading, приватный хост `api-demo.bybit.com`. Ключи `BYBIT_DEMO_API_KEY` и `BYBIT_DEMO_API_SECRET`. В примере `exchange.mode` уже `demo`. |
 | `testnet` | ccxt в sandbox. Bybit смотрит на testnet, Binance spot — на `testnet.binance.vision`. Если URL не тестовый, клиент отказывается слать ордер. |
 | `mainnet` | Не загрузится без `allow_mainnet: true`. Дальше нужны `DEXBOT_MAINNET_API_KEY` и `DEXBOT_MAINNET_API_SECRET`. Этих переменных нет в `.env.example` специально. |
+
+`mode` и `exchange.mode` для demo, testnet и mainnet должны совпадать. Бумажный `mode: paper` ордера не шлёт, даже если `exchange.mode: demo`: так `check` может проверить демо-ключ заранее.
 
 `DEXBOT_MODE` и `DEXBOT_ALLOW_MAINNET` перекрывают yaml, если заданы. Для теста удобнее не экспортировать их.
 
 Kill switch: `risk.kill_switch: true`, флаг CLI `--kill-switch` или файл `data/KILL` (`touch data/KILL`). Позиции закрываются рыночными продажами, новые входы в этом проходе не открываются. Файл сам не удаляется.
+
+## Bybit Demo Trading
+
+Демо-счёт — это отдельный контур на основном сайте Bybit, не testnet и не боевой кошелёк. Приватные запросы идут только на `https://api-demo.bybit.com`. Если публичные ручки демо не отдают стакан или свечи, фильтр читает публичный mainnet без ключа. Ключ к этому клиенту не прикладывается, ордер туда отправить нельзя. Баланс и заявки остаются на демо-хосте. Перед каждым ордером код ещё раз проверяет, что private/spot указывают на `api-demo.bybit.com`.
+
+Счёт демо единый (UNIFIED): в нём USDT, USDC, BTC и ETH. Баланс запрашивается как `type=unified`, спот-ордера — рыночные.
+
+### Ключ
+
+1. В интерфейсе Bybit включите **Демо-торговля** (Demo Trading), не тестовую сеть.
+2. Откройте **API**.
+3. Создайте ключ типа **Транзакция API** (Transaction API).
+4. Права: **Чтение-Запись**.
+5. Вывод средств не включайте. Если в правах есть Withdraw, `check` и `run` откажутся работать.
+6. Впишите ключ и секрет в `.env`:
+
+```bash
+BYBIT_DEMO_API_KEY=...
+BYBIT_DEMO_API_SECRET=...
+```
+
+Значения ключей в лог не пишутся. `check` печатает только `keys_set=true/false`.
+
+### Команды
+
+В `config/default.yaml` уже стоит `exchange.mode: demo`, а стол остаётся `mode: paper`. Проверка ключа ничего не покупает:
+
+```bash
+python -m dexbot check
+```
+
+Один проход с ордерами на демо-счёт:
+
+```bash
+DEXBOT_MODE=demo python -m dexbot run --once
+```
+
+То же самое, если в yaml поставить `mode: demo` (и оставить `exchange.mode: demo`). Если `XAI_API_KEY` пустой или API его отвергает, в логе будет `LLM fallback`, новости не ищутся, а агенты отвечают правилами по уже посчитанным свечам. Сделка возможна только когда код сам видит всплеск объёма и отношение прибыль/риск не хуже 1:2. Офлайн-прогон без биржи по-прежнему `python -m dexbot run --once --mock`.
 
 ## Testnet
 
@@ -132,6 +173,7 @@ Bybit spot, testnet ([testnet.bybit.com](https://testnet.bybit.com)):
 mode: testnet
 exchange:
   name: bybit
+  mode: testnet
 ```
 
 ```bash
@@ -146,6 +188,7 @@ Binance spot, testnet ([testnet.binance.vision](https://testnet.binance.vision))
 mode: testnet
 exchange:
   name: binance
+  mode: testnet
 ```
 
 ```bash
@@ -221,4 +264,5 @@ docker compose run --rm dexbot \
 - не шортит: только спот-лонг;
 - не усредняет уже открытый символ;
 - не доверяет числу риска из текста модели, если код посчитал иначе;
-- не включает mainnet одной опечаткой в `mode`.
+- не включает mainnet одной опечаткой в `mode`;
+- не пускает демо-ордера на `api.bybit.com`: приватный хост проверяется перед заявкой и перед балансом.

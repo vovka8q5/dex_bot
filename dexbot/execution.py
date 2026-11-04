@@ -1,5 +1,6 @@
 """Brokers. Paper never sends orders. Testnet is sandbox-only.
 
+Bybit demo trading uses https://api-demo.bybit.com and is not mainnet.
 Mainnet construction raises unless ``allow_mainnet`` is true.
 """
 
@@ -10,6 +11,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Protocol
+from urllib.parse import urlparse
 
 from dexbot.models import Candle, Fill, Ticker
 
@@ -18,6 +20,15 @@ logger = logging.getLogger("dexbot.execution")
 
 class MainnetDisabled(RuntimeError):
     pass
+
+
+class DemoHostError(RuntimeError):
+    """Private Bybit demo client is not pinned to api-demo.bybit.com."""
+
+
+DEMO_HOST = "api-demo.bybit.com"
+DEMO_REST = "https://api-demo.bybit.com"
+_BALANCE_META = {"info", "free", "used", "total", "timestamp", "datetime", "debt"}
 
 
 class MarketData(Protocol):
@@ -121,6 +132,106 @@ def _exchange_class(name: str):
     raise ValueError(f"unsupported exchange {name}")
 
 
+def _resolved_host(url: str, hostname: str) -> str:
+    text = (url or "").replace("{hostname}", hostname or "")
+    if "://" not in text:
+        text = "https://" + text
+    return (urlparse(text).hostname or "").lower()
+
+
+def assert_demo_urls(client: object) -> None:
+    """Private demo REST must be api-demo.bybit.com, never the real mainnet host."""
+    urls = getattr(client, "urls", {}) or {}
+    api = urls.get("api") or {}
+    if not isinstance(api, dict):
+        raise DemoHostError("Bybit demo client has no API URL map")
+    hostname = getattr(client, "hostname", "") or "bybit.com"
+    for key in ("private", "spot"):
+        host = _resolved_host(str(api.get(key, "")), hostname)
+        if host != DEMO_HOST:
+            raise DemoHostError(
+                f"Bybit demo {key} host is {host or 'unset'}; refusing anything but {DEMO_HOST}"
+            )
+
+
+def configure_bybit_demo(client) -> str:
+    """Pin a Bybit client at demo trading. Returns ``ccxt`` or ``url_override``."""
+    method = getattr(client, "enable_demo_trading", None)
+    if callable(method):
+        method(True)
+        how = "ccxt"
+    else:
+        _force_demo_urls(client)
+        how = "url_override"
+    options = getattr(client, "options", None)
+    if isinstance(options, dict):
+        options["enableDemoTrading"] = True
+        options["enableUnifiedAccount"] = True
+        options["enableUnifiedMargin"] = False
+        options["unifiedMarginStatus"] = 6
+        options["defaultType"] = "spot"
+    assert_demo_urls(client)
+    return how
+
+
+def _force_demo_urls(client) -> None:
+    api = (getattr(client, "urls", {}) or {}).get("api")
+    if isinstance(api, dict):
+        client.urls["api"] = {key: DEMO_REST for key in api}
+    else:
+        client.urls["api"] = DEMO_REST
+    if not getattr(client, "hostname", None):
+        client.hostname = "bybit.com"
+
+
+def guard_client(client, *, kind: str, name: str, allow_mainnet: bool) -> None:
+    """Refuse a private call that is not on the venue the operator selected."""
+    if kind == "demo":
+        if name != "bybit":
+            raise DemoHostError("demo trading is Bybit only")
+        assert_demo_urls(client)
+        return
+    if kind == "testnet":
+        assert_sandbox_urls(name, client)
+        return
+    if kind == "mainnet":
+        if not allow_mainnet:
+            raise MainnetDisabled(
+                "Refusing mainnet orders. Set mode: mainnet and allow_mainnet: true together."
+            )
+        return
+    raise ValueError(f"unsupported venue {kind}")
+
+
+def wallet_totals(balance: dict) -> dict[str, float]:
+    """USDT/USDC/BTC/ETH first, then any other non-zero coin. Ignores raw payloads."""
+    found: dict[str, float] = {}
+
+    def take(code: str, entry: object) -> None:
+        if not isinstance(entry, dict):
+            return
+        if "free" not in entry and "total" not in entry and "used" not in entry:
+            return
+        total = entry.get("total")
+        if total is None:
+            total = float(entry.get("free") or 0) + float(entry.get("used") or 0)
+        found[code] = float(total)
+
+    for code in ("USDT", "USDC", "BTC", "ETH"):
+        if code in balance:
+            take(code, balance[code])
+    for code, entry in balance.items():
+        if code in found or code in _BALANCE_META or not isinstance(code, str):
+            continue
+        if isinstance(entry, dict) and "total" in entry and float(entry.get("total") or 0) != 0:
+            take(code, entry)
+    return found
+
+
+def quote_total(balance: dict, quote: str = "USDT") -> float:
+    return float(wallet_totals(balance).get(quote, 0.0))
+
+
 def assert_sandbox_urls(name: str, client: object) -> None:
     """Refuse to trade if sandbox mode did not retarget the spot REST host."""
     urls = getattr(client, "urls", {}) or {}
@@ -142,12 +253,21 @@ def assert_sandbox_urls(name: str, client: object) -> None:
     raise ValueError(f"unsupported exchange {name}")
 
 
-def make_trading_client(name: str, key: str, secret: str, *, sandbox: bool, allow_mainnet: bool):
-    if not sandbox and not allow_mainnet:
+def make_trading_client(name: str, key: str, secret: str, *, kind: str, allow_mainnet: bool):
+    """Build a private ccxt client. ``kind`` is demo, testnet, or mainnet.
+
+    Keys are passed to ccxt and never logged. Demo never calls ``set_sandbox_mode``
+    and never leaves the private host on api.bybit.com.
+    """
+    if kind not in {"demo", "testnet", "mainnet"}:
+        raise ValueError(f"unsupported venue {kind}")
+    if kind == "mainnet" and not allow_mainnet:
         raise MainnetDisabled(
             "Refusing mainnet orders. Set mode: mainnet and allow_mainnet: true together. "
-            "Paper and testnet do not use this flag."
+            "Paper, demo, and testnet do not use this flag."
         )
+    if kind == "demo" and name != "bybit":
+        raise DemoHostError("demo trading is Bybit only")
     cls = _exchange_class(name)
     client = cls(
         {
@@ -158,14 +278,28 @@ def make_trading_client(name: str, key: str, secret: str, *, sandbox: bool, allo
             "options": {"defaultType": "spot"},
         }
     )
-    if sandbox:
+    if kind == "testnet":
         client.set_sandbox_mode(True)
         assert_sandbox_urls(name, client)
+    elif kind == "demo":
+        configure_bybit_demo(client)
+        guard_client(client, kind="demo", name=name, allow_mainnet=False)
     else:
         logger.critical(
             "MAINNET orders enabled via allow_mainnet on %s. This can move real funds.",
             name,
         )
+    return client
+
+
+def make_public_client(name: str, *, demo: bool = False):
+    """Keyless market-data client. It has no order credentials."""
+    cls = _exchange_class(name)
+    client = cls({"enableRateLimit": True, "timeout": 20_000, "options": {"defaultType": "spot"}})
+    if demo:
+        if name != "bybit":
+            raise DemoHostError("demo market data probe is Bybit only")
+        configure_bybit_demo(client)
     return client
 
 
@@ -266,11 +400,13 @@ class CcxtMarketData:
 
 
 class CcxtBroker:
-    def __init__(self, client, *, sandbox: bool, exchange_name: str) -> None:
+    def __init__(self, client, *, kind: str, exchange_name: str, allow_mainnet: bool) -> None:
         self.client = client
-        self.sandbox = sandbox
+        self.kind = kind
         self.exchange_name = exchange_name
+        self.allow_mainnet = allow_mainnet
         self._marks: dict[str, float] = {}
+        self._guard()
 
     def set_marks(self, marks: dict[str, float]) -> None:
         self._marks = dict(marks)
@@ -282,12 +418,11 @@ class CcxtBroker:
         return float(ticker["last"])
 
     def get_cash(self) -> float:
-        balance = self.client.fetch_balance()
-        usdt = balance.get("USDT") or {}
-        total = usdt.get("total")
-        if total is None:
-            total = float(usdt.get("free") or 0) + float(usdt.get("used") or 0)
-        return float(total or 0)
+        self._guard()
+        # Bybit demo accounts are unified. Ask for that wallet explicitly.
+        params = {"type": "unified"} if self.kind == "demo" and self.exchange_name == "bybit" else {}
+        balance = self.client.fetch_balance(params)
+        return quote_total(balance, "USDT")
 
     def buy(self, symbol: str, qty_base: float) -> Fill:
         self._guard()
@@ -298,17 +433,22 @@ class CcxtBroker:
         return self._order(symbol, "sell", qty_base)
 
     def _guard(self) -> None:
-        if self.sandbox:
-            assert_sandbox_urls(self.exchange_name, self.client)
+        guard_client(
+            self.client,
+            kind=self.kind,
+            name=self.exchange_name,
+            allow_mainnet=self.allow_mainnet,
+        )
 
     def _order(self, symbol: str, side: str, qty_base: float) -> Fill:
         qty = float(self.client.amount_to_precision(symbol, qty_base))
         if qty <= 0:
             raise RuntimeError("amount rounded to zero")
+        params = {"category": "spot"} if self.kind == "demo" and self.exchange_name == "bybit" else {}
         if side == "buy":
-            order = self.client.create_market_buy_order(symbol, qty)
+            order = self.client.create_market_buy_order(symbol, qty, params)
         else:
-            order = self.client.create_market_sell_order(symbol, qty)
+            order = self.client.create_market_sell_order(symbol, qty, params)
         return _fill_from_ccxt(order, symbol, side, qty, self._marks.get(symbol, 0.0))
 
 
@@ -341,6 +481,46 @@ class PublicMarketData(CcxtMarketData):
     """
 
     def __init__(self, exchange_name: str, *, quote: str, timeframe: str, limit: int) -> None:
-        cls = _exchange_class(exchange_name)
-        client = cls({"enableRateLimit": True, "timeout": 20_000, "options": {"defaultType": "spot"}})
+        client = make_public_client(exchange_name, demo=False)
         super().__init__(client, quote=quote, timeframe=timeframe, limit=limit)
+
+
+class SwitchingMarketData:
+    """Try the demo public book, then keyless mainnet public data.
+
+    The fallback client has no API key, so a miss cannot place a mainnet order.
+    """
+
+    def __init__(self, primary: MarketData, secondary: MarketData) -> None:
+        self.primary = primary
+        self.secondary = secondary
+        self.using_secondary = False
+
+    def fetch_tickers(self) -> list[Ticker]:
+        if self.using_secondary:
+            return self.secondary.fetch_tickers()
+        try:
+            rows = self.primary.fetch_tickers()
+        except Exception:
+            logger.warning("demo public tickers unavailable; using mainnet public market data")
+            self.using_secondary = True
+            return self.secondary.fetch_tickers()
+        if not rows:
+            logger.warning("demo public tickers empty; using mainnet public market data")
+            self.using_secondary = True
+            return self.secondary.fetch_tickers()
+        return rows
+
+    def fetch_ohlcv(self, symbol: str) -> list[Candle]:
+        if self.using_secondary:
+            return self.secondary.fetch_ohlcv(symbol)
+        try:
+            rows = self.primary.fetch_ohlcv(symbol)
+        except Exception:
+            logger.warning("demo public ohlcv unavailable for %s; using mainnet public candles", symbol)
+            self.using_secondary = True
+            return self.secondary.fetch_ohlcv(symbol)
+        if not rows:
+            self.using_secondary = True
+            return self.secondary.fetch_ohlcv(symbol)
+        return rows
