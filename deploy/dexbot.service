@@ -1,0 +1,19 @@
+[Unit]
+Description=Dexbot paper/demo crypto desk
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dexbot
+Group=dexbot
+WorkingDirectory=/opt/dexbot
+EnvironmentFile=/opt/dexbot/.env
+ExecStart=/opt/dexbot/.venv/bin/python -m dexbot run --config /opt/dexbot/config/default.yaml
+Restart=always
+RestartSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,21 @@
+services:
+  bot:
+    build: .
+    image: dexbot:local
+    env_file:
+      - .env
+    environment:
+      DEXBOT_LOG_FILE: /app/data/logs/dexbot.log
+    volumes:
+      - dexbot-data:/app/data
+    command: ["python", "-m", "dexbot", "run", "--config", "/app/config/default.yaml"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  dexbot-data:

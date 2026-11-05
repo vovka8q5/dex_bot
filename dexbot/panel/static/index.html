@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="dexbot-token" content="{{TOKEN}}">
+  <title>Dexbot — панель</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div class="atmosphere"></div>
+  <header class="top">
+    <div class="brand">
+      <span class="mark">Dexbot</span>
+      <span class="sub">локальная панель</span>
+    </div>
+    <div class="pills" id="pills"></div>
+    <time id="clock"></time>
+  </header>
+
+  <main>
+    <section class="stats" id="stats"></section>
+
+    <section class="grid-charts">
+      <article class="card wide">
+        <header>
+          <h2>Эквити</h2>
+          <p id="equity-note"></p>
+        </header>
+        <canvas id="equity-chart" height="220"></canvas>
+      </article>
+      <article class="card">
+        <header>
+          <h2>Реализованный PnL</h2>
+          <p>Накоплено по закрытым сделкам журнала</p>
+        </header>
+        <canvas id="pnl-chart" height="220"></canvas>
+      </article>
+      <article class="card">
+        <header>
+          <h2>Просадка</h2>
+          <p id="dd-note">От пика эквити</p>
+        </header>
+        <canvas id="dd-chart" height="220"></canvas>
+      </article>
+    </section>
+
+    <section class="grid-2">
+      <article class="card">
+        <header><h2>Позиции в журнале</h2></header>
+        <div id="positions"></div>
+      </article>
+      <article class="card">
+        <header>
+          <h2>На бирже, но не в журнале</h2>
+          <p>Остатки без цены входа и стопа. Панель их не импортирует.</p>
+        </header>
+        <div id="orphans"></div>
+      </article>
+    </section>
+
+    <section class="grid-2">
+      <article class="card">
+        <header><h2>Голоса последнего прохода</h2></header>
+        <div id="votes"></div>
+      </article>
+      <article class="card">
+        <header>
+          <h2>Полезность агентов</h2>
+          <p>Доля прибыльных среди сделок, где агент сказал buy, минус общий win rate.</p>
+        </header>
+        <div id="useful"></div>
+      </article>
+    </section>
+
+    <section class="card controls">
+      <header>
+        <h2>Управление</h2>
+        <p>Только этот компьютер. Ключи и mainnet здесь не меняются.</p>
+      </header>
+      <div class="buttons">
+        <button type="button" id="btn-kill" class="danger">Включить kill switch</button>
+        <button type="button" id="btn-resume">Снять kill switch</button>
+        <button type="button" id="btn-refresh">Обновить отчёт</button>
+        <button type="button" id="btn-once">Один проход</button>
+      </div>
+      <p id="action-note" class="note"></p>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
