@@ -8,7 +8,7 @@ from pathlib import Path
 
 from dexbot.agents import run_second_layer
 from dexbot.filter import filter_tokens
-from dexbot.execution import PaperBroker
+from dexbot.execution import PaperBroker, flat_symbols
 from dexbot.journal import Journal
 from dexbot.logging_setup import event
 from dexbot.market import TIMEFRAME_MS, compute_stats, drop_forming
@@ -117,6 +117,85 @@ def run_cycle(runtime: Runtime, *, kill: bool = False, now: datetime | None = No
     return summary
 
 
+def _reconcile_flat(runtime: Runtime, run_id: int, now: datetime) -> int:
+    """Close journal rows whose coins are already gone on the exchange."""
+    broker = runtime.venue.broker
+    getter = getattr(broker, "asset_balances", None)
+    if not callable(getter):
+        event(logger, "reconcile", exchange_balances=False)
+        return 0
+    try:
+        balances = getter()
+    except Exception:
+        logger.exception("reconcile_balance_failed")
+        return 0
+    closed = 0
+    for pos in flat_symbols(runtime.journal.open_positions(), balances):
+        try:
+            mark = float(broker.mark(pos.symbol))
+        except Exception:
+            mark = float(pos.last_mark or pos.avg_entry)
+        fill = Fill(
+            order_id=f"reconcile-{pos.id}",
+            symbol=pos.symbol,
+            side="sell",
+            price=mark,
+            qty_base=pos.qty_base,
+            qty_quote=pos.qty_base * mark,
+            fee_quote=0.0,
+            status="reconciled",
+        )
+        try:
+            pnl = runtime.journal.record_exit(
+                run_id=run_id,
+                position_id=pos.id,
+                mode=runtime.settings.mode,
+                fill=fill,
+                reason="reconciled_flat",
+                created_at=now,
+                cash=_paper_cash(runtime),
+            )
+        except Exception:
+            logger.exception("reconcile_journal_failed symbol=%s", pos.symbol)
+            continue
+        closed += 1
+        event(logger, "reconciled_flat", symbol=pos.symbol, pnl=round(pnl, 6), run_id=run_id)
+    event(logger, "reconcile", flattened=closed, still_open=runtime.journal.open_count())
+    return closed
+
+
+def _attach_protection(
+    runtime: Runtime,
+    run_id: int,
+    symbol: str,
+    qty: float,
+    stop: float,
+    take_profit: float,
+    now: datetime,
+) -> None:
+    method = getattr(runtime.venue.broker, "place_protection", None)
+    if not callable(method):
+        return
+    try:
+        placed = method(symbol, qty, stop, take_profit)
+    except Exception:
+        logger.exception("protective_orders_failed symbol=%s", symbol)
+        return
+    for item in placed:
+        runtime.journal.record_protection_order(
+            run_id=run_id,
+            symbol=symbol,
+            qty_base=float(item["qty_base"]),
+            trigger=float(item["trigger"]),
+            order_id=str(item["order_id"]),
+            mode=runtime.settings.mode,
+            reason=str(item["reason"]),
+            created_at=now,
+        )
+    if placed:
+        event(logger, "protective_orders", symbol=symbol, count=len(placed), run_id=run_id)
+
+
 def _flush_usage(runtime: Runtime, run_id: int, moment: datetime) -> None:
     reader = getattr(runtime.llm, "usage_calls", None)
     calls = list(reader()) if callable(reader) else []
@@ -150,7 +229,7 @@ def _run(runtime: Runtime, run_id: int, now: datetime, kill: bool) -> CycleSumma
     if journal.day_start_equity(now) is None:
         journal.snapshot_equity(now, _equity(runtime))
 
-    closed = 0
+    closed = _reconcile_flat(runtime, run_id, now)
     if _kill_on(runtime, kill):
         for pos in journal.open_positions():
             if _close(runtime, run_id, pos.id, pos.symbol, pos.qty_base, "kill_switch", now):
@@ -391,6 +470,15 @@ def _symbol(
     except Exception:
         _refund(runtime, fill)
         raise
+    _attach_protection(
+        runtime,
+        run_id,
+        symbol,
+        fill.qty_base,
+        decision.stop_loss,
+        decision.take_profit,
+        now,
+    )
     event(
         logger,
         "order_filled",

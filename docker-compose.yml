@@ -1,11 +1,21 @@
 services:
-  dexbot:
+  bot:
     build: .
+    image: dexbot:local
     env_file:
       - .env
+    environment:
+      DEXBOT_LOG_FILE: /app/data/logs/dexbot.log
     volumes:
-      - ./data:/app/data
-      - ./config/default.yaml:/app/config/default.yaml:ro
-    # Образ уже запускает часовой цикл. Для разового dry-run:
-    # command: ["python", "-m", "dexbot", "run", "--once", "--mock", "--config", "/app/config/default.yaml"]
+      - dexbot-data:/app/data
+    command: ["python", "-m", "dexbot", "run", "--config", "/app/config/default.yaml"]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  dexbot-data:

@@ -231,50 +231,9 @@ SQLite (`journal.path`, по умолчанию `data/journal.sqlite`):
 
 ## Деплой на Linux
 
-### systemd
+Пошаговая инструкция для своего сервера (Docker или systemd, журнал, kill switch, бэкап): [docs/DEPLOY_RU.md](docs/DEPLOY_RU.md).
 
-```bash
-sudo useradd --system --create-home --home-dir /opt/dexbot dexbot
-sudo mkdir -p /opt/dexbot
-sudo rsync -a --exclude .venv --exclude data ./ /opt/dexbot/
-sudo python3 -m venv /opt/dexbot/.venv
-sudo /opt/dexbot/.venv/bin/pip install -e /opt/dexbot
-sudo cp /opt/dexbot/.env.example /opt/dexbot/.env
-sudo chown -R dexbot:dexbot /opt/dexbot
-# вписать ключи в /opt/dexbot/.env и при необходимости mode: testnet в yaml
-sudo cp deploy/dexbot.service /etc/systemd/system/dexbot.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now dexbot
-sudo journalctl -u dexbot -f
-```
-
-Юнит запускает `python -m dexbot run` из `/opt/dexbot` и подхватывает `.env`. Остановить входы и закрыть позиции: `sudo -u dexbot touch /opt/dexbot/data/KILL` и дождаться следующего прохода, либо `systemctl stop` после ручного `--kill-switch`, если нужно закрыть сразу:
-
-```bash
-sudo -u dexbot /opt/dexbot/.venv/bin/python -m dexbot run --once --kill-switch \
-  --config /opt/dexbot/config/default.yaml
-```
-
-### Docker
-
-Каталог `data/` должен быть доступен uid 10001, под которым работает образ.
-
-```bash
-cp .env.example .env
-mkdir -p data
-sudo chown 10001:10001 data
-docker compose up -d --build
-docker compose logs -f
-```
-
-Разовый mock внутри контейнера:
-
-```bash
-docker compose run --rm dexbot \
-  python -m dexbot run --once --mock --config /app/config/default.yaml
-```
-
-Образ не включает `allow_mainnet`. Пока в примонтированном yaml стоит `mode: paper`, контейнер не шлёт ордера.
+На Bybit demo после покупки стол ставит отдельные условные заявки stop и take-profit (`orderFilter=tpslOrder`). Они живут на бирже, даже если процесс выключен. При старте каждого прохода журнал сверяется с балансом: если монеты уже нет, позиция закрывается без повторной продажи, затем проверяются стопы по тем позициям, что ещё на счёте.
 
 ## Что сознательно не делает стол
 

@@ -432,6 +432,69 @@ class CcxtBroker:
         self._guard()
         return self._order(symbol, "sell", qty_base)
 
+    def asset_balances(self) -> dict[str, float]:
+        """Base-coin totals from the same wallet orders use. Missing coins are absent."""
+        self._guard()
+        params = {"type": "unified"} if self.kind == "demo" and self.exchange_name == "bybit" else {}
+        balance = self.client.fetch_balance(params)
+        return wallet_totals(balance)
+
+    def place_protection(self, symbol: str, qty_base: float, stop: float, take_profit: float) -> list[dict]:
+        """Bybit spot conditional TP/SL, separate from the market buy.
+
+        ccxt refuses to attach stopLoss/takeProfit to a spot market order.
+        Bybit accepts a follow-up ``tpslOrder`` (triggerDirection 2 = stop, 1 = take-profit).
+        A rejected leg is logged and skipped; the bot loop still checks stops.
+        """
+        self._guard()
+        if self.exchange_name != "bybit":
+            logger.info(
+                "exchange protective stops are not implemented for %s; the hourly loop still enforces them",
+                self.exchange_name,
+            )
+            return []
+        submit = getattr(self.client, "privatePostV5OrderCreate", None)
+        if not callable(submit):
+            logger.warning("bybit client cannot place v5 spot tpsl orders; loop stops remain")
+            return []
+        placed: list[dict] = []
+        legs = (
+            ("exchange_stop", stop, 2),
+            ("exchange_take_profit", take_profit, 1),
+        )
+        for reason, trigger, direction in legs:
+            body = {
+                "category": "spot",
+                "symbol": _bybit_symbol_id(self.client, symbol),
+                "side": "Sell",
+                "orderType": "Market",
+                "qty": _amount_string(self.client, symbol, qty_base),
+                "triggerPrice": _price_string(self.client, symbol, trigger),
+                "triggerDirection": direction,
+                "orderFilter": "tpslOrder",
+                "triggerBy": "LastPrice",
+            }
+            try:
+                response = submit(body)
+            except Exception:
+                logger.warning("protective %s request failed for %s", reason, symbol)
+                continue
+            order_id = _bybit_order_id(response)
+            if not order_id:
+                code = response.get("retCode") if isinstance(response, dict) else None
+                logger.warning("protective %s rejected for %s code=%s", reason, symbol, code)
+                continue
+            placed.append(
+                {
+                    "reason": reason,
+                    "order_id": order_id,
+                    "symbol": symbol,
+                    "qty_base": qty_base,
+                    "trigger": trigger,
+                }
+            )
+        return placed
+
     def _guard(self) -> None:
         guard_client(
             self.client,
@@ -450,6 +513,55 @@ class CcxtBroker:
         else:
             order = self.client.create_market_sell_order(symbol, qty, params)
         return _fill_from_ccxt(order, symbol, side, qty, self._marks.get(symbol, 0.0))
+
+
+def _bybit_symbol_id(client, symbol: str) -> str:
+    market_fn = getattr(client, "market", None)
+    if callable(market_fn):
+        try:
+            market = market_fn(symbol)
+        except Exception:
+            market = None
+        if isinstance(market, dict) and market.get("id"):
+            return str(market["id"])
+    return symbol.replace("/", "")
+
+
+def _amount_string(client, symbol: str, qty: float) -> str:
+    precise = getattr(client, "amount_to_precision", None)
+    if callable(precise):
+        return str(precise(symbol, qty))
+    return str(qty)
+
+
+def _price_string(client, symbol: str, price: float) -> str:
+    precise = getattr(client, "price_to_precision", None)
+    if callable(precise):
+        return str(precise(symbol, price))
+    return str(price)
+
+
+def _bybit_order_id(response: object) -> str | None:
+    if not isinstance(response, dict):
+        return None
+    if str(response.get("retCode", 0)) != "0":
+        return None
+    result = response.get("result") or {}
+    if not isinstance(result, dict):
+        return None
+    order_id = result.get("orderId") or result.get("order_id")
+    return str(order_id) if order_id else None
+
+
+def flat_symbols(positions: list, balances: dict[str, float], *, dust_ratio: float = 0.5) -> list:
+    """Journal positions the exchange no longer holds (stop filled while we were down)."""
+    gone = []
+    for pos in positions:
+        base = pos.symbol.split("/")[0]
+        held = float(balances.get(base, 0.0))
+        if held + 1e-12 < float(pos.qty_base) * dust_ratio:
+            gone.append(pos)
+    return gone
 
 
 def _fill_from_ccxt(order: dict, symbol: str, side: str, fallback_qty: float, mark: float) -> Fill:

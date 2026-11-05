@@ -165,6 +165,29 @@ class Journal:
         self.conn.commit()
         return int(cur.lastrowid)
 
+    def record_protection_order(
+        self,
+        *,
+        run_id: int,
+        symbol: str,
+        qty_base: float,
+        trigger: float,
+        order_id: str,
+        mode: str,
+        reason: str,
+        created_at: datetime,
+    ) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO orders (
+                run_id, decision_id, symbol, side, qty_base, qty_quote, price,
+                status, exchange_order_id, mode, reason, created_at
+            ) VALUES (?, NULL, ?, 'sell', ?, NULL, ?, 'accepted', ?, ?, ?, ?)
+            """,
+            (run_id, symbol, qty_base, trigger, order_id, mode, reason, _iso(created_at)),
+        )
+        self.conn.commit()
+
     def record_llm_usage(self, run_id: int, calls: list[dict], *, created_at: datetime) -> None:
         if not calls:
             return

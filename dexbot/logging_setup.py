@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 
 class JsonFormatter(logging.Formatter):
@@ -27,11 +29,20 @@ class JsonFormatter(logging.Formatter):
 def configure_logging(level: str = "INFO", json_logs: bool = True) -> None:
     root = logging.getLogger()
     root.handlers.clear()
+    formatter: logging.Formatter
+    if json_logs:
+        formatter = JsonFormatter()
+    else:
+        formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
     handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(JsonFormatter() if json_logs else logging.Formatter(
-        "%(asctime)s %(levelname)s %(name)s %(message)s"
-    ))
+    handler.setFormatter(formatter)
     root.addHandler(handler)
+    log_file = os.getenv("DEXBOT_LOG_FILE", "").strip()
+    if log_file:
+        Path(log_file).parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(log_file, encoding="utf-8")
+        file_handler.setFormatter(formatter)
+        root.addHandler(file_handler)
     root.setLevel(level.upper())
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("openai").setLevel(logging.WARNING)

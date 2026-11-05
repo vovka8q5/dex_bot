@@ -1,5 +1,5 @@
 [Unit]
-Description=Dexbot paper/testnet crypto desk
+Description=Dexbot paper/demo crypto desk
 After=network-online.target
 Wants=network-online.target
 
@@ -10,8 +10,8 @@ Group=dexbot
 WorkingDirectory=/opt/dexbot
 EnvironmentFile=/opt/dexbot/.env
 ExecStart=/opt/dexbot/.venv/bin/python -m dexbot run --config /opt/dexbot/config/default.yaml
-Restart=on-failure
-RestartSec=30
+Restart=always
+RestartSec=15
 NoNewPrivileges=true
 PrivateTmp=true
 
