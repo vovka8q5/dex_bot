@@ -301,9 +301,30 @@ def _env_bool(name: str) -> bool | None:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _dotenv_candidates(config_path: Path) -> list[Path]:
+    """`.env` next to the working directory, then next to the project that holds the config."""
+    found: list[Path] = []
+    cwd_env = Path.cwd() / ".env"
+    if cwd_env.is_file():
+        found.append(cwd_env)
+    # config/default.yaml -> project root .env. Works for C:\dexbot\config\default.yaml too.
+    if config_path.parent.name == "config":
+        project_env = config_path.resolve().parents[1] / ".env"
+        if project_env.is_file() and project_env not in found:
+            found.append(project_env)
+    return found
+
+
+def load_dotenv_files(config_path: Path) -> None:
+    """Load `.env` as UTF-8, including a Notepad BOM. Existing process env wins."""
+    for candidate in _dotenv_candidates(config_path):
+        load_dotenv(candidate, override=False, encoding="utf-8-sig")
+    load_dotenv(override=False, encoding="utf-8-sig")
+
+
 def load_settings(path: Path | str | None = None) -> Settings:
-    load_dotenv(override=False)
     config_path = Path(path) if path else default_config_path()
+    load_dotenv_files(config_path)
     data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     if not isinstance(data, dict):
         raise ValueError(f"config must be a mapping: {config_path}")
@@ -313,6 +334,24 @@ def load_settings(path: Path | str | None = None) -> Settings:
     flag = _env_bool("DEXBOT_ALLOW_MAINNET")
     if flag is not None:
         data["allow_mainnet"] = flag
+    journal = os.getenv("DEXBOT_JOURNAL", "").strip()
+    if journal:
+        current = data.get("journal")
+        if current is None:
+            data["journal"] = {"path": journal}
+        elif isinstance(current, dict):
+            current["path"] = journal
+        else:
+            raise ValueError("journal in config must be a mapping when DEXBOT_JOURNAL is set")
+    kill_file = os.getenv("DEXBOT_KILL_FILE", "").strip()
+    if kill_file:
+        current = data.get("risk")
+        if current is None:
+            data["risk"] = {"kill_switch_file": kill_file}
+        elif isinstance(current, dict):
+            current["kill_switch_file"] = kill_file
+        else:
+            raise ValueError("risk in config must be a mapping when DEXBOT_KILL_FILE is set")
     return Settings.model_validate(data)
 
 

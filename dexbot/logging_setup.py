@@ -26,7 +26,20 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False, default=str)
 
 
+def prefer_utf8(stream: object) -> None:
+    """Ask a text stream for UTF-8. Windows consoles otherwise use a legacy code page."""
+    reconfigure = getattr(stream, "reconfigure", None)
+    if not callable(reconfigure):
+        return
+    try:
+        reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        return
+
+
 def configure_logging(level: str = "INFO", json_logs: bool = True) -> None:
+    prefer_utf8(sys.stdout)
+    prefer_utf8(sys.stderr)
     root = logging.getLogger()
     root.handlers.clear()
     formatter: logging.Formatter
