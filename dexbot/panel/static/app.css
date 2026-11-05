@@ -1,0 +1,139 @@
+:root {
+  --bg: #10140f;
+  --bg-2: #1a2118;
+  --card: rgba(22, 28, 23, 0.92);
+  --line: rgba(232, 220, 188, 0.14);
+  --gold: #d7b56d;
+  --gold-2: #f0d7a2;
+  --text: #e8f0e4;
+  --muted: #8e9a8c;
+  --up: #8fbf7f;
+  --down: #d07a6a;
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body {
+  font-family: "Segoe UI", "Aptos", system-ui, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  letter-spacing: 0.01em;
+}
+.atmosphere {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(900px 420px at 8% -10%, rgba(215, 181, 109, 0.16), transparent 60%),
+    radial-gradient(700px 380px at 100% 0%, rgba(90, 122, 84, 0.18), transparent 55%),
+    linear-gradient(180deg, #141a13 0%, var(--bg) 38%);
+}
+.top, main { position: relative; }
+.top {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 32px 40px 8px;
+}
+.brand { display: flex; flex-direction: column; gap: 4px; }
+.mark {
+  font-family: Palatino, "Palatino Linotype", "Iowan Old Style", Georgia, serif;
+  font-size: 40px;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+}
+.sub { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: 0.16em; }
+.pills { display: flex; flex-wrap: wrap; gap: 8px; }
+.pill {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: 13px;
+  color: var(--gold-2);
+}
+.pill.warn { color: var(--down); border-color: rgba(208, 122, 106, 0.45); }
+.pill.ok { color: var(--up); border-color: rgba(143, 191, 127, 0.4); }
+#clock { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
+main { padding: 16px 40px 48px; display: flex; flex-direction: column; gap: 18px; }
+.stats, .grid-charts, .grid-2 { display: grid; gap: 18px; }
+.stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.grid-charts { grid-template-columns: 1.4fr 1fr 1fr; }
+.grid-2 { grid-template-columns: 1fr 1fr; }
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 18px 18px 14px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(8px);
+}
+.card header h2, .stat h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.card header p { margin: 6px 0 12px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.stat {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 18px;
+}
+.stat strong {
+  display: block;
+  margin-top: 10px;
+  font-family: Palatino, Georgia, serif;
+  font-size: 34px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+}
+.up { color: var(--up); }
+.down { color: var(--down); }
+canvas { width: 100%; display: block; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
+td { font-variant-numeric: tabular-nums; }
+.empty { color: var(--muted); padding: 8px 0 12px; }
+.vote {
+  display: grid;
+  grid-template-columns: 92px 1fr auto;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+.vote b { font-weight: 600; }
+.vote span { color: var(--muted); }
+.buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+button {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: #222920;
+  color: var(--text);
+  border-radius: 999px;
+  padding: 10px 16px;
+  font: inherit;
+  cursor: pointer;
+}
+button:hover { border-color: var(--gold); }
+button.danger { background: #3a2420; color: #f0c2b8; }
+.note { min-height: 1.2em; color: var(--gold-2); }
+.orphan {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+@media (max-width: 1100px) {
+  .stats, .grid-charts, .grid-2 { grid-template-columns: 1fr; }
+  .top, main { padding-left: 16px; padding-right: 16px; }
+}

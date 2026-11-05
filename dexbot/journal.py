@@ -219,6 +219,23 @@ class Journal:
     def llm_usage_rows(self) -> list[dict]:
         return [dict(row) for row in self.conn.execute("SELECT * FROM llm_calls ORDER BY id")]
 
+    def equity_series(self, limit: int = 500) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT ts, equity FROM equity_snapshots ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [{"ts": row["ts"], "equity": float(row["equity"])} for row in reversed(rows)]
+
+    def recent_runs(self, limit: int = 8) -> list[dict]:
+        rows = self.conn.execute(
+            """
+            SELECT id, started_at, finished_at, mode, exchange, status
+            FROM runs ORDER BY id DESC LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def finish_run(self, run_id: int, status: str, note: str = "", finished_at: datetime | None = None) -> None:
         self.conn.execute(
             "UPDATE runs SET status=?, note=?, finished_at=? WHERE id=?",

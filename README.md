@@ -231,6 +231,8 @@ SQLite (`journal.path`, по умолчанию `data/journal.sqlite`):
 
 ## Деплой
 
+Локальная панель: `python -m dexbot panel` → http://127.0.0.1:8787 (только этот компьютер).
+
 Сервер в Windows (основная инструкция, PowerShell): [docs/DEPLOY_WINDOWS_RU.md](docs/DEPLOY_WINDOWS_RU.md).
 
 Тот же стол на Linux (Docker или systemd): [docs/DEPLOY_RU.md](docs/DEPLOY_RU.md).

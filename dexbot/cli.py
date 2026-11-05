@@ -5,9 +5,11 @@ from __future__ import annotations
 import argparse
 import logging
 import time
+from datetime import datetime, timedelta, timezone
 
 from dexbot.check import inspect_connection, render_check
 from dexbot.config import load_settings
+from dexbot.heartbeat import write_heartbeat
 from dexbot.logging_setup import configure_logging, event
 from dexbot.pipeline import run_cycle
 from dexbot.report import load_report, render_report
@@ -38,11 +40,30 @@ def main(argv: list[str] | None = None) -> int:
     check = sub.add_parser("check", help="Show whether keys are set, permissions, and balances")
     check.add_argument("--config", default=None)
 
+    panel = sub.add_parser("panel", help="Local dashboard on 127.0.0.1")
+    panel.add_argument("--host", default="127.0.0.1")
+    panel.add_argument("--port", type=int, default=8787)
+    panel.add_argument("--allow-lan", action="store_true", help="Bind beyond loopback. Do not publish the port.")
+    panel.add_argument("--config", default=None)
+    panel.add_argument("--journal", default=None)
+
     args = parser.parse_args(argv)
     settings = load_settings(args.config)
     if getattr(args, "journal", None):
         settings.journal.path = args.journal
     configure_logging(settings.log_level, settings.log_json)
+
+    if args.command == "panel":
+        from dexbot.panel.app import serve_panel
+
+        serve_panel(
+            settings,
+            host=args.host,
+            port=args.port,
+            config_path=str(args.config) if args.config else None,
+            allow_lan=args.allow_lan,
+        )
+        return 0
 
     if args.command == "check":
         report = inspect_connection(settings)
@@ -71,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _serve(settings, *, once: bool, mock: bool) -> int:
     runtime = build_runtime(settings, mock=mock)
+    last_cycle = None
     event(
         logger,
         "desk_start",
@@ -83,6 +105,7 @@ def _serve(settings, *, once: bool, mock: bool) -> int:
     )
     try:
         while True:
+            write_heartbeat(settings, phase="running", last_cycle_at=last_cycle)
             try:
                 summary = run_cycle(runtime)
             except KeyboardInterrupt:
@@ -92,6 +115,7 @@ def _serve(settings, *, once: bool, mock: bool) -> int:
                 if once:
                     return 1
             else:
+                last_cycle = datetime.now(timezone.utc).isoformat(timespec="seconds")
                 print(summary.line(), flush=True)
                 if once:
                     return 0
@@ -100,9 +124,12 @@ def _serve(settings, *, once: bool, mock: bool) -> int:
                 runtime.settings.scheduler.interval_seconds,
                 runtime.settings.scheduler.align_to_hour,
             )
+            next_at = (datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat(timespec="seconds")
+            write_heartbeat(settings, phase="sleeping", last_cycle_at=last_cycle, next_cycle_at=next_at)
             event(logger, "sleep", seconds=round(delay, 1))
             time.sleep(delay)
     except KeyboardInterrupt:
         return 0
     finally:
+        write_heartbeat(settings, phase="stopped", last_cycle_at=last_cycle)
         runtime.journal.close()
